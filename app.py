@@ -2,9 +2,31 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs
 import html
 import re
+import os
 
 HOST = "127.0.0.1"
 PORT = 8890
+
+
+
+
+def get_llm_config():
+    """
+    读取 LLM 配置。
+    当前只读取配置，不调用外部 API。
+    注意：不要把 LLM_API_KEY 输出到页面或日志。
+    """
+    enabled = os.getenv("ENABLE_LLM", "false").lower() == "true"
+    provider = os.getenv("LLM_PROVIDER", "openai")
+    model = os.getenv("LLM_MODEL", "")
+    api_key = os.getenv("LLM_API_KEY", "")
+
+    return {
+        "enabled": enabled,
+        "provider": provider,
+        "model": model,
+        "api_key_configured": bool(api_key),
+    }
 
 
 # =========================
@@ -194,6 +216,12 @@ def run_blog_content_agent(text):
 
     trace.append("接收文章草稿")
 
+    llm_config = get_llm_config()
+    if llm_config["enabled"]:
+        trace.append("读取 LLM 配置：ENABLE_LLM=true，后续可接入大模型生成标题和摘要")
+    else:
+        trace.append("读取 LLM 配置：ENABLE_LLM=false，当前使用规则型工具流程")
+
     security = tool_check_sensitive_info(clean)
     checklist = tool_generate_publish_checklist()
 
@@ -209,7 +237,8 @@ def run_blog_content_agent(text):
             "tags": ["内容不足"],
             "security": security,
             "checklist": checklist,
-            "trace": trace
+            "trace": trace,
+            "llm_config": llm_config
         }
 
     tags = tool_recommend_tags(clean)
@@ -232,7 +261,8 @@ def run_blog_content_agent(text):
         "tags": tags,
         "security": security,
         "checklist": checklist,
-        "trace": trace
+        "trace": trace,
+        "llm_config": llm_config
     }
 
 
@@ -335,6 +365,10 @@ class Handler(BaseHTTPRequestHandler):
         security_html = "".join(f"<li>{html.escape(item)}</li>" for item in result["security"]["items"])
         trace_html = "".join(f"<li>{html.escape(item)}</li>" for item in result["trace"])
 
+        llm_config = result["llm_config"]
+        llm_status = "已开启" if llm_config["enabled"] else "未开启"
+        api_key_status = "已配置" if llm_config["api_key_configured"] else "未配置"
+
         security_level = result["security"]["level"]
         security_class = "warning" if security_level == "需要注意" else "safe"
 
@@ -407,6 +441,14 @@ class Handler(BaseHTTPRequestHandler):
       <ul>
         {trace_html}
       </ul>
+    </div>
+
+    <div class="card">
+      <h2>LLM 配置状态</h2>
+      <p><strong>LLM 开关：</strong>{html.escape(llm_status)}</p>
+      <p><strong>Provider：</strong>{html.escape(llm_config["provider"])}</p>
+      <p><strong>Model：</strong>{html.escape(llm_config["model"])}</p>
+      <p><strong>API Key：</strong>{html.escape(api_key_status)}（页面不会显示密钥内容）</p>
     </div>
 
     <div class="card">
